@@ -1,3 +1,9 @@
+import os
+import moviepy.editor as mp
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.oauth2 import service_account
+
 class CombineAudioVideoAndUpload:
     def __init__(self):
         self.drive_service = self.authenticate_google_drive()
