@@ -1,4 +1,7 @@
 import os
+import requests
+from moviepy.editor import VideoFileClip, AudioFileClip
+from tempfile import mkdtemp
 import moviepy.editor as mp
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -71,11 +74,77 @@ class CombineAudioVideoAndUpload:
 
         return (public_file_url, output_file)
 
+class VideoAudioLoader:
+    def __init__(self):
+        self.temp_dir = mkdtemp()
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "url": ("STRING", {"default": "", "tooltip": "URL of the video or audio file."}),
+                "upload": ("FILE", {"tooltip": "Upload a video or audio file from your computer."}),
+            },
+        }
+
+    RETURN_TYPES = ("VIDEO", "AUDIO")
+    RETURN_NAMES = ("video_output", "audio_output")
+    FUNCTION = "load_media"
+    OUTPUT_NODE = True
+    CATEGORY = "media"
+
+    def download_file(self, url, file_type="video"):
+        """Download video or audio file from URL."""
+        try:
+            response = requests.get(url)
+            file_extension = "mp4" if file_type == "video" else "mp3"
+            file_name = os.path.join(self.temp_dir, f"downloaded_file.{file_extension}")
+            with open(file_name, "wb") as file:
+                file.write(response.content)
+            return file_name
+        except Exception as e:
+            print(f"Error downloading file from {url}: {e}")
+            return None
+
+    def load_media(self, url="", upload=None):
+        """Load video/audio either from URL or uploaded file."""
+        if url:
+            # Load file from URL
+            if url.endswith(".mp4"):
+                file_type = "video"
+            elif url.endswith(".mp3"):
+                file_type = "audio"
+            else:
+                raise ValueError("Unsupported file type in URL")
+
+            file_path = self.download_file(url, file_type=file_type)
+        elif upload:
+            # Use uploaded file
+            file_path = upload
+            if upload.endswith(".mp4"):
+                file_type = "video"
+            elif upload.endswith(".mp3"):
+                file_type = "audio"
+            else:
+                raise ValueError("Unsupported file type in upload")
+        else:
+            raise ValueError("Either URL or upload must be provided")
+
+        # Process file depending on whether it's video or audio
+        if file_type == "video":
+            video_clip = VideoFileClip(file_path)
+            audio_clip = video_clip.audio
+            return video_clip, audio_clip
+        elif file_type == "audio":
+            audio_clip = AudioFileClip(file_path)
+            return None, audio_clip
 
 NODE_CLASS_MAPPINGS = {
-    "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload
+    "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
+    "VideoAudioLoader": VideoAudioLoader
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "CombineAudioVideoAndUpload": "Combine Audio and Video, Upload to Drive"
+    "CombineAudioVideoAndUpload": "Combine Audio and Video, Upload to Drive",
+    "VideoAudioLoader": "Load Video/Audio from URL or Upload"
 }
