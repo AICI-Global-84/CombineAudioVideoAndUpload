@@ -1,4 +1,4 @@
-from .CombineAudioVideoAndUpload import CombineAudioVideoAndUpload 
+from .CombineAudioVideoAndUpload import CombineAudioVideoAndUpload, VideoAudioLoader
 
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
