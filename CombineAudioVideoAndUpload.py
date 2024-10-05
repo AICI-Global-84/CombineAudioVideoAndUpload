@@ -9,8 +9,8 @@ import json
 
 class CombineAudioVideoAndUpload:
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
-    SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'  # Thay đổi path này
-    DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'  # Thay đổi folder ID này
+    SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'
+    DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'
     
     @classmethod
     def INPUT_TYPES(s):
@@ -45,7 +45,6 @@ class CombineAudioVideoAndUpload:
         self._initialize_drive_service()
 
     def _initialize_drive_service(self):
-        """Khởi tạo Google Drive service sử dụng Service Account."""
         try:
             credentials = service_account.Credentials.from_service_account_file(
                 self.SERVICE_ACCOUNT_FILE, scopes=self.SCOPES)
@@ -55,7 +54,6 @@ class CombineAudioVideoAndUpload:
             raise RuntimeError(f"Failed to initialize Drive service: {str(e)}")
             
     def _upload_to_drive(self, file_path):
-        """Upload file lên Google Drive và trả về direct link."""
         try:
             file_metadata = {
                 'name': os.path.basename(file_path),
@@ -68,14 +66,12 @@ class CombineAudioVideoAndUpload:
                 fields='id'
             ).execute()
 
-            # Cập nhật permission để file public
             self.drive_service.permissions().create(
                 fileId=file.get('id'),
                 body={'type': 'anyone', 'role': 'reader'},
                 fields='id'
             ).execute()
 
-            # Tạo direct link
             file_id = file.get('id')
             return f"https://drive.google.com/uc?id={file_id}"
 
@@ -85,68 +81,54 @@ class CombineAudioVideoAndUpload:
     def combine_and_upload(self, video, audio, start_duration, end_duration):
         """
         Kết hợp video và audio, sau đó upload lên Drive.
-        
-        Args:
-            video: Video input từ node LoadVideo
-            audio: Audio input từ node LoadAudio
-            start_duration: Thời gian delay trước khi audio bắt đầu (seconds)
-            end_duration: Thời gian video tiếp tục sau khi audio kết thúc (seconds)
-        
-        Returns:
-            tuple: (drive_url, combined_video)
         """
         try:
-            # Tạo temporary files
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video, \
-                 tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio, \
-                 tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
-                
-                # Lưu video và audio vào temporary files
-                temp_video_path = temp_video.name
-                temp_audio_path = temp_audio.name
+            # Debug: In loại dữ liệu và giá trị của video và audio
+            print(f"Video input type: {type(video)}")
+            print(f"Audio input type: {type(audio)}")
+            print(f"Video input: {video}")
+            print(f"Audio input: {audio}")
+
+            # Kiểm tra xem video có đúng định dạng và chứa 'path' không
+            if isinstance(video, dict) and 'path' in video:
+                video_clip = VideoFileClip(video['path'])
+            else:
+                raise TypeError(f"Invalid video input: {video}")
+
+            # Kiểm tra xem audio có đúng định dạng và chứa 'path' không
+            if isinstance(audio, dict) and 'path' in audio:
+                audio_clip = AudioFileClip(audio['path'])
+            else:
+                raise TypeError(f"Invalid audio input: {audio}")
+
+            # Xử lý phần còn lại như bình thường
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
                 temp_output_path = temp_output.name
 
-                # Xử lý video input
-                video_clip = VideoFileClip(video['path'])
-                
-                # Xử lý audio input
-                audio_clip = AudioFileClip(audio['path'])
-                
-                # Tính toán duration
                 total_duration = audio_clip.duration + start_duration + end_duration
-                
-                # Nếu video ngắn hơn total_duration, loop video
                 if video_clip.duration < total_duration:
                     video_clip = video_clip.loop(duration=total_duration)
                 else:
-                    # Cắt video cho khớp với total_duration
                     video_clip = video_clip.subclip(0, total_duration)
 
-                # Set audio start time
                 audio_clip = audio_clip.set_start(start_duration)
-
-                # Combine video và audio
                 final_clip = CompositeVideoClip([video_clip])
                 final_clip = final_clip.set_audio(audio_clip)
 
-                # Write ra file
                 final_clip.write_videofile(
                     temp_output_path,
                     codec='libx264',
                     audio_codec='aac',
-                    temp_audiofile=temp_audio_path,
+                    temp_audiofile=temp_output_path.replace('.mp4', '.wav'),
                     remove_temp=True
                 )
 
-                # Upload lên Drive
                 drive_url = self._upload_to_drive(temp_output_path)
 
-                # Cleanup
                 video_clip.close()
                 audio_clip.close()
                 final_clip.close()
 
-                # Đọc file output để return
                 with open(temp_output_path, 'rb') as f:
                     combined_video = {'path': temp_output_path, 'data': f.read()}
 
@@ -156,17 +138,12 @@ class CombineAudioVideoAndUpload:
             raise RuntimeError(f"Failed to combine video and audio: {str(e)}")
 
         finally:
-            # Cleanup temporary files
-            for path in [temp_video_path, temp_audio_path, temp_output_path]:
+            for path in [temp_output_path]:
                 if os.path.exists(path):
                     os.unlink(path)
 
     @classmethod
     def IS_CHANGED(s, video, audio, start_duration, end_duration):
-        """
-        Kiểm tra xem có cần render lại video không.
-        """
-        # Generate hash từ tất cả inputs
         m = hashlib.sha256()
         m.update(str(video).encode())
         m.update(str(audio).encode())
