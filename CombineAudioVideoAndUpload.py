@@ -128,12 +128,15 @@ class CombineAudioVideoAndUpload:
                 else:
                     video_clip = video_clip.subclip(0, total_duration)
     
-                # Dịch chuyển audio bắt đầu sau start_duration giây
-                audio_clip = audio_clip.set_start(start_duration)
+                # Tạo đoạn audio silent trước khi audio chính bắt đầu
+                silent_audio = AudioClip(lambda t: 0, duration=start_duration, fps=audio_clip.fps)
+                
+                # Nối đoạn silent với đoạn audio thực
+                final_audio_clip = concatenate_audioclips([silent_audio, audio_clip])
     
                 # Kết hợp video và audio
                 final_clip = CompositeVideoClip([video_clip])
-                final_clip = final_clip.set_audio(audio_clip)  # Gán âm thanh cho video
+                final_clip = final_clip.set_audio(final_audio_clip)  # Gán âm thanh cho video
     
                 # Lưu video đầu ra với audio
                 final_clip.write_videofile(
@@ -161,6 +164,7 @@ class CombineAudioVideoAndUpload:
             # Kiểm tra nếu temp_output_path đã được khởi tạo và xóa file tạm
             if temp_output_path and os.path.exists(temp_output_path):
                 os.unlink(temp_output_path)
+
 
 
 
