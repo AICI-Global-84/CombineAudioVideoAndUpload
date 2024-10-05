@@ -135,14 +135,18 @@ class VideoAudioLoader:
 
     def load(self, video_url):
         # Logic tải video từ URL
-        video_data = self.download_file(video_url)
-        return (video_data,)  # Trả về video đã tải
+        video_path = self.download_file(video_url)
+        return (video_path,)  # Trả về đường dẫn của video đã tải
 
     def download_file(self, url):
         # Logic để tải file từ URL
-        import requests
-        response = requests.get(url)
-        return response.content  # Trả về nội dung của video
+        local_filename = url.split('/')[-1]  # Lấy tên file từ URL
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(local_filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): 
+                    f.write(chunk)
+        return local_filename  # Trả về đường dẫn đến file đã tải
 
 
             
