@@ -1,12 +1,12 @@
 import os
 import tempfile
+import hashlib  # Thêm import này
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2.service_account import ServiceAccountCredentials  # Thêm import này
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-import pickle
+import json
 
 class CombineAudioVideoAndUpload:
     """
@@ -14,14 +14,12 @@ class CombineAudioVideoAndUpload:
     
     Attributes:
         SCOPES (list): Google Drive API scopes needed
-        CREDENTIALS_FILE (str): Path to credentials file
-        TOKEN_FILE (str): Path to token file
+        SERVICE_ACCOUNT_FILE (str): Path to service account credentials file
         DRIVE_FOLDER_ID (str): Google Drive folder ID to upload to
     """
     
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
-    CREDENTIALS_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'  # Thay đổi path này
-    TOKEN_FILE = 'token.pickle'
+    SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'  # Thay đổi path này
     DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'  # Thay đổi folder ID này
 
     @classmethod
@@ -57,23 +55,14 @@ class CombineAudioVideoAndUpload:
         self._initialize_drive_service()
 
     def _initialize_drive_service(self):
-        """Khởi tạo Google Drive service."""
-        creds = None
-        if os.path.exists(self.TOKEN_FILE):
-            with open(self.TOKEN_FILE, 'rb') as token:
-                creds = pickle.load(token)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self.CREDENTIALS_FILE, self.SCOPES)
-                creds = flow.run_local_server(port=0)
-            with open(self.TOKEN_FILE, 'wb') as token:
-                pickle.dump(creds, token)
-
-        self.drive_service = build('drive', 'v3', credentials=creds)
+        """Khởi tạo Google Drive service sử dụng Service Account."""
+        try:
+            credentials = ServiceAccountCredentials.from_json_keyfile_name(
+                self.SERVICE_ACCOUNT_FILE, self.SCOPES)
+            self.drive_service = build('drive', 'v3', credentials=credentials)
+        except Exception as e:
+            print(f"Error initializing Drive service: {str(e)}")
+            raise RuntimeError(f"Failed to initialize Drive service: {str(e)}")
 
     def _upload_to_drive(self, file_path):
         """Upload file lên Google Drive và trả về direct link."""
@@ -194,7 +183,6 @@ class CombineAudioVideoAndUpload:
         m.update(str(start_duration).encode())
         m.update(str(end_duration).encode())
         return m.digest().hex()
-
 class VideoAudioLoader:
     """
     Node để tải video từ URL
