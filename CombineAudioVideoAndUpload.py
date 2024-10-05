@@ -79,71 +79,57 @@ class CombineAudioVideoAndUpload:
         return (public_file_url, output_file)
 
 class VideoAudioLoader:
+    """
+    Node để tải video từ URL
+
+    Class methods
+    -------------
+    INPUT_TYPES (dict):
+        Định nghĩa các tham số đầu vào cho node.
+
+    Attributes
+    ----------
+    RETURN_TYPES (`tuple`):
+        Kiểu dữ liệu cho mỗi phần tử trong tuple đầu ra.
+    RETURN_NAMES (`tuple`):
+        Tên tùy chọn cho mỗi đầu ra trong tuple đầu ra.
+    FUNCTION (`str`):
+        Tên phương thức entry-point. Ví dụ, nếu `FUNCTION = "load"`, thì nó sẽ chạy VideoAudioLoader().load()
+    OUTPUT_NODE ([`bool`]):
+        Nếu node này là một output node để xuất kết quả từ đồ thị.
+    CATEGORY (`str`):
+        Danh mục mà node nên xuất hiện trong giao diện.
+    """
+    def __init__(self):
+        pass
+
     @classmethod
-    def INPUT_TYPES(cls):
-        input_dir = get_input_directory()
-        files = filter_files_content_types(os.listdir(input_dir), ["video"])
+    def INPUT_TYPES(s):
         return {
             "required": {
-                "video": (sorted(files), {"video_upload": True}),
-                "url": ([], {"url_upload": True}),
-            }
+                "video_url": ("STRING", {
+                    "multiline": False,
+                    "default": "http://example.com/video.mp4",
+                    "lazy": True
+                }),
+            },
         }
 
-    CATEGORY = "video"
+    RETURN_TYPES = ("VIDEO",)  # Kiểu đầu ra là VIDEO
+    FUNCTION = "load"          # Tên phương thức entry-point
+    CATEGORY = "Media Loader"   # Danh mục cho node
 
-    RETURN_TYPES = ("VIDEO", "AUDIO")
-    FUNCTION = "load_video_audio"
+    def load(self, video_url):
+        # Logic tải video từ URL
+        video_data = self.download_file(video_url)
+        return (video_data,)  # Trả về video đã tải
 
-    def load_video_audio(self, video, url):
-        # Nếu có URL, tải video từ URL
-        if url:
-            response = requests.get(url)
-            video_path = "/tmp/temp_video.mp4"
-            with open(video_path, 'wb') as f:
-                f.write(response.content)
-        else:
-            video_path = get_annotated_filepath(video)
+    def download_file(self, url):
+        # Logic để tải file từ URL
+        import requests
+        response = requests.get(url)
+        return response.content  # Trả về nội dung của video
 
-        # Tải video bằng OpenCV
-        cap = cv2.VideoCapture(video_path)
-        frames = []
-        audio_waveform = None
-
-        # Lấy thông tin video và âm thanh
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            frames.append(frame)
-
-        cap.release()
-
-        # Chuyển đổi danh sách frames thành tensor
-        video_tensor = torch.tensor(np.array(frames)).permute(0, 3, 1, 2)  # Chuyển đổi thành (N, C, H, W)
-
-        # Lấy âm thanh từ video
-        audio_waveform, sample_rate = torchaudio.load(video_path)
-        
-        audio = {"waveform": audio_waveform.unsqueeze(0), "sample_rate": sample_rate}
-
-        return (video_tensor, audio)
-
-    @classmethod
-    def IS_CHANGED(cls, video):
-        video_path = get_annotated_filepath(video)
-        m = hashlib.sha256()
-        with open(video_path, 'rb') as f:
-            m.update(f.read())
-        return m.digest().hex()
-
-    @classmethod
-    def VALIDATE_INPUTS(cls, video, url):
-        if url and not (url.startswith("http://") or url.startswith("https://")):
-            return "Invalid URL: {}".format(url)
-        if video and not exists_annotated_filepath(video):
-            return "Invalid video file: {}".format(video)
-        return True
 
             
 NODE_CLASS_MAPPINGS = {
