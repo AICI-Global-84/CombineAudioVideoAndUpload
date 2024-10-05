@@ -84,14 +84,14 @@ class CombineAudioVideoAndUpload:
         Kết hợp video và audio, sau đó upload lên Drive.
         """
         temp_output_path = None  # Khởi tạo biến temp_output_path để tránh lỗi UnboundLocalError
-
+    
         try:
             # Debug: In loại dữ liệu và giá trị của video và audio
             print(f"Video input type: {type(video)}")
             print(f"Audio input type: {type(audio)}")
             print(f"Video input: {video}")
             print(f"Audio input: {audio}")
-
+    
             # Lưu video byte vào file tạm thời nếu video là dạng byte
             if isinstance(video, bytes):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_video_file:
@@ -100,57 +100,56 @@ class CombineAudioVideoAndUpload:
                     video_clip = VideoFileClip(temp_video_path)
             else:
                 raise TypeError(f"Invalid video input: {video}")
-
+    
             # Nếu audio là dạng tensor, lưu nó ra file .wav
             if isinstance(audio, dict) and 'waveform' in audio and 'sample_rate' in audio:
                 waveform = audio['waveform'].numpy()  # Chuyển tensor thành numpy array
                 waveform = waveform.squeeze()  # Loại bỏ chiều không cần thiết
                 sample_rate = audio['sample_rate']
-
+    
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
                     sf.write(temp_audio_file.name, waveform, sample_rate)  # Lưu audio ra file wav
                     temp_audio_path = temp_audio_file.name
-
+    
                 audio_clip = AudioFileClip(temp_audio_path)
             else:
                 raise TypeError(f"Invalid audio input: {audio}")
-
+    
             # Xử lý phần còn lại như bình thường
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
                 temp_output_path = temp_output.name
-
+    
                 total_duration = audio_clip.duration + start_duration + end_duration
                 if video_clip.duration < total_duration:
                     video_clip = video_clip.loop(duration=total_duration)
                 else:
                     video_clip = video_clip.subclip(0, total_duration)
-
+    
                 audio_clip = audio_clip.set_start(start_duration)
                 final_clip = CompositeVideoClip([video_clip])
-                final_clip = final_clip.set_audio(audio_clip)
-
+                final_clip = final_clip.set_audio(audio_clip)  # Gán âm thanh cho video
+    
                 final_clip.write_videofile(
                     temp_output_path,
                     codec='libx264',
-                    audio_codec='aac',
-                    temp_audiofile=temp_output_path.replace('.mp4', '.wav'),
+                    audio_codec='aac',  # Đảm bảo sử dụng codec âm thanh đúng
                     remove_temp=True
                 )
-
+    
                 drive_url = self._upload_to_drive(temp_output_path)
-
+    
                 video_clip.close()
                 audio_clip.close()
                 final_clip.close()
-
+    
                 with open(temp_output_path, 'rb') as f:
                     combined_video = {'path': temp_output_path, 'data': f.read()}
-
+    
                 return (drive_url, combined_video)
-
+    
         except Exception as e:
             raise RuntimeError(f"Failed to combine video and audio: {str(e)}")
-
+    
         finally:
             # Kiểm tra nếu temp_output_path đã được khởi tạo và xóa file tạm
             if temp_output_path and os.path.exists(temp_output_path):
