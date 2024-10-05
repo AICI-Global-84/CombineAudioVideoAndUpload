@@ -119,16 +119,23 @@ class CombineAudioVideoAndUpload:
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
                 temp_output_path = temp_output.name
     
+                # Tính tổng thời lượng dựa trên audio, start_duration và end_duration
                 total_duration = audio_clip.duration + start_duration + end_duration
+    
+                # Nếu video ngắn hơn tổng thời lượng, lặp lại video để phù hợp với tổng thời lượng
                 if video_clip.duration < total_duration:
                     video_clip = video_clip.loop(duration=total_duration)
                 else:
-                    video_clip = video_clip.subclip(0, total_duration)
+                    video_clip = video_clip.subclip(start_duration, total_duration - end_duration)
     
+                # Set thời gian bắt đầu của audio
                 audio_clip = audio_clip.set_start(start_duration)
+    
+                # Tạo video kết hợp và gán audio
                 final_clip = CompositeVideoClip([video_clip])
                 final_clip = final_clip.set_audio(audio_clip)  # Gán âm thanh cho video
     
+                # Xuất video ra file
                 final_clip.write_videofile(
                     temp_output_path,
                     codec='libx264',
@@ -154,6 +161,7 @@ class CombineAudioVideoAndUpload:
             # Kiểm tra nếu temp_output_path đã được khởi tạo và xóa file tạm
             if temp_output_path and os.path.exists(temp_output_path):
                 os.unlink(temp_output_path)
+
 
 class VideoAudioLoader:
     """
