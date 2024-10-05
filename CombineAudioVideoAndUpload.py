@@ -1,6 +1,7 @@
 import os
 import tempfile
-import hashlib  # Thêm import này
+import hashlib
+import soundfile as sf
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -100,9 +101,16 @@ class CombineAudioVideoAndUpload:
             else:
                 raise TypeError(f"Invalid video input: {video}")
 
-            # Kiểm tra xem audio có đúng định dạng và chứa 'path' không
-            if isinstance(audio, dict) and 'path' in audio:
-                audio_clip = AudioFileClip(audio['path'])
+            # Nếu audio là dạng tensor, lưu nó ra file .wav
+            if isinstance(audio, dict) and 'waveform' in audio and 'sample_rate' in audio:
+                waveform = audio['waveform'].numpy()  # Chuyển tensor thành numpy array
+                sample_rate = audio['sample_rate']
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
+                    sf.write(temp_audio_file.name, waveform.T, sample_rate)  # Lưu audio ra file wav
+                    temp_audio_path = temp_audio_file.name
+
+                audio_clip = AudioFileClip(temp_audio_path)
             else:
                 raise TypeError(f"Invalid audio input: {audio}")
 
