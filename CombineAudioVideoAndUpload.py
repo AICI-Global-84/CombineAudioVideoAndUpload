@@ -76,15 +76,17 @@ class CombineAudioVideoAndUpload:
 
 class VideoAudioLoader:
     def __init__(self):
+        # Tạo thư mục tạm để lưu file tạm thời
         self.temp_dir = mkdtemp()
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "url": ("STRING", {"default": "", "tooltip": "URL of the video or audio file."}),
-                "upload": ("FILE", {"tooltip": "Upload a video or audio file from your computer."}),
-            },
+                "url": ("STRING", {"default": "", "tooltip": "URL of the video or audio file."}),  # Ô để nhập URL
+                # "FILE" được thay bằng "FILE_UPLOAD" để tạo nút upload file
+                "file_upload": ("FILE_UPLOAD", {"tooltip": "Upload a video or audio file from your computer."}),
+            }
         }
 
     RETURN_TYPES = ("VIDEO", "AUDIO")
@@ -96,8 +98,10 @@ class VideoAudioLoader:
     def download_file(self, url, file_type="video"):
         """Download video or audio file from URL."""
         try:
+            # Tải nội dung từ URL
             response = requests.get(url)
             file_extension = "mp4" if file_type == "video" else "mp3"
+            # Lưu file tạm thời trong thư mục temp
             file_name = os.path.join(self.temp_dir, f"downloaded_file.{file_extension}")
             with open(file_name, "wb") as file:
                 file.write(response.content)
@@ -106,31 +110,32 @@ class VideoAudioLoader:
             print(f"Error downloading file from {url}: {e}")
             return None
 
-    def load_media(self, url="", upload=None):
-        """Load video/audio either from URL or uploaded file."""
+    def load_media(self, url="", file_upload=None):
+        """Load video/audio from URL or uploaded file."""
+        file_type = None
+        file_path = None
+
+        # Kiểm tra URL hoặc file upload
         if url:
-            # Load file from URL
             if url.endswith(".mp4"):
                 file_type = "video"
             elif url.endswith(".mp3"):
                 file_type = "audio"
             else:
                 raise ValueError("Unsupported file type in URL")
-
             file_path = self.download_file(url, file_type=file_type)
-        elif upload:
-            # Use uploaded file
-            file_path = upload
-            if upload.endswith(".mp4"):
+        elif file_upload:
+            file_path = file_upload
+            if file_upload.endswith(".mp4"):
                 file_type = "video"
-            elif upload.endswith(".mp3"):
+            elif file_upload.endswith(".mp3"):
                 file_type = "audio"
             else:
                 raise ValueError("Unsupported file type in upload")
         else:
             raise ValueError("Either URL or upload must be provided")
 
-        # Process file depending on whether it's video or audio
+        # Xử lý file video hoặc audio
         if file_type == "video":
             video_clip = VideoFileClip(file_path)
             audio_clip = video_clip.audio
@@ -138,7 +143,7 @@ class VideoAudioLoader:
         elif file_type == "audio":
             audio_clip = AudioFileClip(file_path)
             return None, audio_clip
-
+            
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
     "VideoAudioLoader": VideoAudioLoader
