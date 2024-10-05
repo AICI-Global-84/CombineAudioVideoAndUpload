@@ -82,6 +82,8 @@ class VideoAudioLoader:
                 "video_url": ("STRING", {"default": ""}),
                 "audio_source": (["Upload", "URL"],),
                 "audio_url": ("STRING", {"default": ""}),
+            },
+            "optional": {
                 "video_file": ("FILE", {"file_upload": True}),
                 "audio_file": ("FILE", {"file_upload": True}),
             }
@@ -91,7 +93,7 @@ class VideoAudioLoader:
     FUNCTION = "load_media"
     CATEGORY = "Video/Audio"
 
-    def load_media(self, video_source, video_url, video_file, audio_source, audio_url, audio_file):
+    def load_media(self, video_source, video_url, video_file=None, audio_source=None, audio_url=None, audio_file=None):
         video_clip = None
         audio_clip = None
 
@@ -108,6 +110,32 @@ class VideoAudioLoader:
             audio_clip = AudioFileClip(audio_file)
 
         return (video_clip, audio_clip)
+
+    @classmethod
+    def IS_CHANGED(s, video_file=None, audio_file=None):
+        if video_file:
+            video_path = os.path.abspath(video_file)
+            return os.path.exists(video_path)
+        if audio_file:
+            audio_path = os.path.abspath(audio_file)
+            return os.path.exists(audio_path)
+        return False
+
+    @classmethod
+    def VALIDATE_INPUTS(s, video_source, video_url=None, video_file=None, audio_source=None, audio_url=None, audio_file=None):
+        # Validate video input
+        if video_source == "URL" and not video_url:
+            return "Video URL is required."
+        if video_source == "Upload" and not video_file:
+            return "Video file is required for upload."
+
+        # Validate audio input
+        if audio_source == "URL" and not audio_url:
+            return "Audio URL is required."
+        if audio_source == "Upload" and not audio_file:
+            return "Audio file is required for upload."
+
+        return True
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
