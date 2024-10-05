@@ -1,7 +1,11 @@
 import os
+import hashlib
+import torchaudio
+import cv2
+import numpy as np
+import torch
 import requests
 import moviepy.editor as mp
-from moviepy.editor import VideoFileClip, AudioFileClip
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
@@ -75,67 +79,71 @@ class CombineAudioVideoAndUpload:
 
 class VideoAudioLoader:
     @classmethod
-    def INPUT_TYPES(s):
+    def INPUT_TYPES(cls):
+        input_dir = folder_paths.get_input_directory()
+        files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["video"])
         return {
             "required": {
-                "video_source": (["Upload", "URL"],),
-                "video_url": ("STRING", {"default": ""}),
-                "audio_source": (["Upload", "URL"],),
-                "audio_url": ("STRING", {"default": ""}),
-            },
-            "optional": {
-                "video_file": ("FILE", {"file_upload": True}),
-                "audio_file": ("FILE", {"file_upload": True}),
+                "video": (sorted(files), {"video_upload": True}),
+                "url": ([], {"url_upload": True}),
             }
         }
 
+    CATEGORY = "video"
+
     RETURN_TYPES = ("VIDEO", "AUDIO")
-    FUNCTION = "load_media"
-    CATEGORY = "Video/Audio"
+    FUNCTION = "load_video_audio"
 
-    def load_media(self, video_source, video_url, video_file=None, audio_source=None, audio_url=None, audio_file=None):
-        video_clip = None
-        audio_clip = None
+    def load_video_audio(self, video, url):
+        # Nếu có URL, tải video từ URL
+        if url:
+            response = requests.get(url)
+            video_path = "/tmp/temp_video.mp4"
+            with open(video_path, 'wb') as f:
+                f.write(response.content)
+        else:
+            video_path = folder_paths.get_annotated_filepath(video)
 
-        # Load video
-        if video_source == "URL" and video_url:
-            video_clip = VideoFileClip(video_url)
-        elif video_source == "Upload" and video_file:
-            video_clip = VideoFileClip(video_file)
+        # Tải video bằng OpenCV
+        cap = cv2.VideoCapture(video_path)
+        frames = []
+        audio_waveform = None
 
-        # Load audio
-        if audio_source == "URL" and audio_url:
-            audio_clip = AudioFileClip(audio_url)
-        elif audio_source == "Upload" and audio_file:
-            audio_clip = AudioFileClip(audio_file)
+        # Lấy thông tin video và âm thanh
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
 
-        return (video_clip, audio_clip)
+        cap.release()
+
+        # Chuyển đổi danh sách frames thành tensor
+        video_tensor = torch.tensor(np.array(frames)).permute(0, 3, 1, 2)  # Chuyển đổi thành (N, C, H, W)
+
+        # Lấy âm thanh từ video
+        audio_waveform, sample_rate = torchaudio.load(video_path)
+        
+        audio = {"waveform": audio_waveform.unsqueeze(0), "sample_rate": sample_rate}
+
+        return (video_tensor, audio)
 
     @classmethod
-    def IS_CHANGED(s, video_file=None, audio_file=None):
-        if video_file:
-            video_path = os.path.abspath(video_file)
-            return os.path.exists(video_path)
-        if audio_file:
-            audio_path = os.path.abspath(audio_file)
-            return os.path.exists(audio_path)
-        return False
+    def IS_CHANGED(cls, video):
+        video_path = folder_paths.get_annotated_filepath(video)
+        m = hashlib.sha256()
+        with open(video_path, 'rb') as f:
+            m.update(f.read())
+        return m.digest().hex()
 
     @classmethod
-    def VALIDATE_INPUTS(s, video_source, video_url=None, video_file=None, audio_source=None, audio_url=None, audio_file=None):
-        # Validate video input
-        if video_source == "URL" and not video_url:
-            return "Video URL is required."
-        if video_source == "Upload" and not video_file:
-            return "Video file is required for upload."
-
-        # Validate audio input
-        if audio_source == "URL" and not audio_url:
-            return "Audio URL is required."
-        if audio_source == "Upload" and not audio_file:
-            return "Audio file is required for upload."
-
+    def VALIDATE_INPUTS(cls, video, url):
+        if url and not (url.startswith("http://") or url.startswith("https://")):
+            return "Invalid URL: {}".format(url)
+        if video and not folder_paths.exists_annotated_filepath(video):
+            return "Invalid video file: {}".format(video)
         return True
+
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
