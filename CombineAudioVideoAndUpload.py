@@ -1,96 +1,199 @@
 import os
-import requests
-import moviepy.editor as mp
+import tempfile
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
+import pickle
 
 class CombineAudioVideoAndUpload:
-    def __init__(self):
-        self.drive_service = self.authenticate_google_drive()
-
-    def authenticate_google_drive(self):
-        """Authenticate and create a Google Drive API service."""
-        SCOPES = ['https://www.googleapis.com/auth/drive']
-        credentials_path = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'
-        credentials = service_account.Credentials.from_service_account_file(
-            credentials_path, scopes=SCOPES)
-        return build('drive', 'v3', credentials=credentials)
+    """
+    Node để kết hợp video và audio, sau đó upload lên Google Drive.
+    
+    Attributes:
+        SCOPES (list): Google Drive API scopes needed
+        CREDENTIALS_FILE (str): Path to credentials file
+        TOKEN_FILE (str): Path to token file
+        DRIVE_FOLDER_ID (str): Google Drive folder ID to upload to
+    """
+    
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    CREDENTIALS_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'  # Thay đổi path này
+    TOKEN_FILE = 'token.pickle'
+    DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'  # Thay đổi folder ID này
 
     @classmethod
-    def INPUT_TYPES(cls):
+    def INPUT_TYPES(s):
         return {
             "required": {
-                "video": ("ANY", {"tooltip": "The input video file."}),  # Thay FILE thành ANY
-                "audio": ("ANY", {"tooltip": "The input audio file."}),  # Thay FILE thành ANY
-                "start_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video starts before audio."}),
-                "end_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video ends after audio."})
+                "video": ("VIDEO",),
+                "audio": ("AUDIO",),
+                "start_duration": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "display": "number"
+                }),
+                "end_duration": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "display": "number"
+                })
             }
         }
 
-    RETURN_TYPES = ("STRING", "FILE")
-    RETURN_NAMES = ("file_url", "combined_video")
+    RETURN_TYPES = ("STRING", "VIDEO",)
+    RETURN_NAMES = ("file_url", "combined_video",)
     FUNCTION = "combine_and_upload"
-    OUTPUT_NODE = True
-    CATEGORY = "video"
+    CATEGORY = "video/audio"
 
-    def combine_video_audio(self, video_path, audio_path, start_duration, end_duration, output_path):
-        """Combine video and audio, adjusting durations as specified."""
-        video = mp.VideoFileClip(video_path)
-        audio = mp.AudioFileClip(audio_path)
+    def __init__(self):
+        self.drive_service = None
+        self._initialize_drive_service()
 
-        adjusted_start = max(0, start_duration)
-        adjusted_end = video.duration - (audio.duration + adjusted_start) + end_duration
+    def _initialize_drive_service(self):
+        """Khởi tạo Google Drive service."""
+        creds = None
+        if os.path.exists(self.TOKEN_FILE):
+            with open(self.TOKEN_FILE, 'rb') as token:
+                creds = pickle.load(token)
 
-        if adjusted_end < 0:
-            adjusted_end = 0
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    self.CREDENTIALS_FILE, self.SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open(self.TOKEN_FILE, 'wb') as token:
+                pickle.dump(creds, token)
 
-        combined = video.subclip(adjusted_start, video.duration - adjusted_end).set_audio(audio)
-        combined.write_videofile(output_path, codec="libx264", audio_codec="aac")
+        self.drive_service = build('drive', 'v3', credentials=creds)
 
-    def upload_to_google_drive(self, file_path):
+    def _upload_to_drive(self, file_path):
+        """Upload file lên Google Drive và trả về direct link."""
         try:
-            file_metadata = {'name': os.path.basename(file_path), 'parents': ['1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a']}
-            media = MediaFileUpload(file_path, mimetype='video/mp4')
-            file = self.drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+            file_metadata = {
+                'name': os.path.basename(file_path),
+                'parents': [self.DRIVE_FOLDER_ID]
+            }
+            media = MediaFileUpload(file_path, resumable=True)
+            file = self.drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
 
+            # Cập nhật permission để file public
+            self.drive_service.permissions().create(
+                fileId=file.get('id'),
+                body={'type': 'anyone', 'role': 'reader'},
+                fields='id'
+            ).execute()
+
+            # Tạo direct link
             file_id = file.get('id')
-            self.drive_service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
             return f"https://drive.google.com/uc?id={file_id}"
+
         except Exception as e:
-            print(f"An error occurred while uploading to Google Drive: {e}")
-            return None
+            raise RuntimeError(f"Failed to upload to Drive: {str(e)}")
 
-    def combine_and_upload(self, video, audio, start_duration=0, end_duration=0):
-        output_file = "/tmp/combined_output.mp4"
+    def combine_and_upload(self, video, audio, start_duration, end_duration):
+        """
+        Kết hợp video và audio, sau đó upload lên Drive.
+        
+        Args:
+            video: Video input từ node LoadVideo
+            audio: Audio input từ node LoadAudio
+            start_duration: Thời gian delay trước khi audio bắt đầu (seconds)
+            end_duration: Thời gian video tiếp tục sau khi audio kết thúc (seconds)
+        
+        Returns:
+            tuple: (drive_url, combined_video)
+        """
+        try:
+            # Tạo temporary files
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video, \
+                 tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio, \
+                 tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_output:
+                
+                # Lưu video và audio vào temporary files
+                temp_video_path = temp_video.name
+                temp_audio_path = temp_audio.name
+                temp_output_path = temp_output.name
 
-        # Kiểm tra kiểu dữ liệu cho video
-        if isinstance(video, bytes):
-            with open("/tmp/temp_video.mp4", "wb") as f:
-                f.write(video)
-            video_path = "/tmp/temp_video.mp4"
-        elif isinstance(video, str):
-            video_path = video
-        else:
-            raise ValueError("video must be of type str or bytes.")
+                # Xử lý video input
+                video_clip = VideoFileClip(video['path'])
+                
+                # Xử lý audio input
+                audio_clip = AudioFileClip(audio['path'])
+                
+                # Tính toán duration
+                total_duration = audio_clip.duration + start_duration + end_duration
+                
+                # Nếu video ngắn hơn total_duration, loop video
+                if video_clip.duration < total_duration:
+                    video_clip = video_clip.loop(duration=total_duration)
+                else:
+                    # Cắt video cho khớp với total_duration
+                    video_clip = video_clip.subclip(0, total_duration)
 
-        # Kiểm tra kiểu dữ liệu cho audio
-        if isinstance(audio, bytes):
-            with open("/tmp/temp_audio.mp3", "wb") as f:
-                f.write(audio)
-            audio_path = "/tmp/temp_audio.mp3"
-        elif isinstance(audio, str):
-            audio_path = audio
-        else:
-            raise ValueError("audio must be of type str or bytes.")
+                # Set audio start time
+                audio_clip = audio_clip.set_start(start_duration)
 
-        self.combine_video_audio(video_path, audio_path, start_duration, end_duration, output_file)
+                # Combine video và audio
+                final_clip = CompositeVideoClip([video_clip])
+                final_clip = final_clip.set_audio(audio_clip)
 
-        public_file_url = self.upload_to_google_drive(output_file)
-        if not public_file_url:
-            return ("", output_file)
+                # Write ra file
+                final_clip.write_videofile(
+                    temp_output_path,
+                    codec='libx264',
+                    audio_codec='aac',
+                    temp_audiofile=temp_audio_path,
+                    remove_temp=True
+                )
 
-        return (public_file_url, output_file)
+                # Upload lên Drive
+                drive_url = self._upload_to_drive(temp_output_path)
+
+                # Cleanup
+                video_clip.close()
+                audio_clip.close()
+                final_clip.close()
+
+                # Đọc file output để return
+                with open(temp_output_path, 'rb') as f:
+                    combined_video = {'path': temp_output_path, 'data': f.read()}
+
+                return (drive_url, combined_video)
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to combine video and audio: {str(e)}")
+
+        finally:
+            # Cleanup temporary files
+            for path in [temp_video_path, temp_audio_path, temp_output_path]:
+                if os.path.exists(path):
+                    os.unlink(path)
+
+    @classmethod
+    def IS_CHANGED(s, video, audio, start_duration, end_duration):
+        """
+        Kiểm tra xem có cần render lại video không.
+        """
+        # Generate hash từ tất cả inputs
+        m = hashlib.sha256()
+        m.update(str(video).encode())
+        m.update(str(audio).encode())
+        m.update(str(start_duration).encode())
+        m.update(str(end_duration).encode())
+        return m.digest().hex()
 
 class VideoAudioLoader:
     """
