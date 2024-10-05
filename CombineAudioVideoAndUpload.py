@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import torch
 import requests
+from folder_paths import get_input_directory, filter_files_content_types, get_annotated_filepath, exists_annotated_filepath  # Nhập từ folder_paths.py
 import moviepy.editor as mp
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -80,8 +81,8 @@ class CombineAudioVideoAndUpload:
 class VideoAudioLoader:
     @classmethod
     def INPUT_TYPES(cls):
-        input_dir = folder_paths.get_input_directory()
-        files = folder_paths.filter_files_content_types(os.listdir(input_dir), ["video"])
+        input_dir = get_input_directory()
+        files = filter_files_content_types(os.listdir(input_dir), ["video"])
         return {
             "required": {
                 "video": (sorted(files), {"video_upload": True}),
@@ -102,7 +103,7 @@ class VideoAudioLoader:
             with open(video_path, 'wb') as f:
                 f.write(response.content)
         else:
-            video_path = folder_paths.get_annotated_filepath(video)
+            video_path = get_annotated_filepath(video)
 
         # Tải video bằng OpenCV
         cap = cv2.VideoCapture(video_path)
@@ -130,7 +131,7 @@ class VideoAudioLoader:
 
     @classmethod
     def IS_CHANGED(cls, video):
-        video_path = folder_paths.get_annotated_filepath(video)
+        video_path = get_annotated_filepath(video)
         m = hashlib.sha256()
         with open(video_path, 'rb') as f:
             m.update(f.read())
@@ -140,7 +141,7 @@ class VideoAudioLoader:
     def VALIDATE_INPUTS(cls, video, url):
         if url and not (url.startswith("http://") or url.startswith("https://")):
             return "Invalid URL: {}".format(url)
-        if video and not folder_paths.exists_annotated_filepath(video):
+        if video and not exists_annotated_filepath(video):
             return "Invalid video file: {}".format(video)
         return True
 
