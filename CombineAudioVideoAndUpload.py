@@ -1,9 +1,7 @@
 import os
 import requests
-from moviepy.editor import VideoFileClip, AudioFileClip
-import folder_paths
-from tempfile import mkdtemp
 import moviepy.editor as mp
+from moviepy.editor import VideoFileClip, AudioFileClip
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
@@ -80,38 +78,34 @@ class VideoAudioLoader:
     def INPUT_TYPES(s):
         return {
             "required": {
+                "video_source": (["Upload", "URL"],),
                 "video_url": ("STRING", {"default": ""}),
+                "audio_source": (["Upload", "URL"],),
                 "audio_url": ("STRING", {"default": ""}),
-                "video_file": ("FILE", {"file_upload": True, "optional": True}),
-                "audio_file": ("FILE", {"file_upload": True, "optional": True}),
-            },
+                "video_file": ("FILE", {"file_upload": True}),
+                "audio_file": ("FILE", {"file_upload": True}),
+            }
         }
-
-    CATEGORY = "media"
 
     RETURN_TYPES = ("VIDEO", "AUDIO")
     FUNCTION = "load_media"
+    CATEGORY = "Video/Audio"
 
-    def load_media(self, video_url=None, audio_url=None, video_file=None, audio_file=None):
-        video_clip, audio_clip = None, None
+    def load_media(self, video_source, video_url, video_file, audio_source, audio_url, audio_file):
+        video_clip = None
+        audio_clip = None
 
-        # Load video from uploaded file or URL
-        if video_file:
-            video_clip = VideoFileClip(video_file)
-        elif video_url:
+        # Load video
+        if video_source == "URL" and video_url:
             video_clip = VideoFileClip(video_url)
+        elif video_source == "Upload" and video_file:
+            video_clip = VideoFileClip(video_file)
 
-        # Load audio from uploaded file or URL
-        if audio_file:
-            audio_clip = AudioFileClip(audio_file)
-        elif audio_url:
+        # Load audio
+        if audio_source == "URL" and audio_url:
             audio_clip = AudioFileClip(audio_url)
-
-        # Kiểm tra nếu không có file hoặc URL nào được cung cấp
-        if not video_clip:
-            raise ValueError("You must provide either a video file or a video URL.")
-        if not audio_clip:
-            raise ValueError("You must provide either an audio file or an audio URL.")
+        elif audio_source == "Upload" and audio_file:
+            audio_clip = AudioFileClip(audio_file)
 
         return (video_clip, audio_clip)
             
