@@ -80,10 +80,10 @@ class VideoAudioLoader:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "video_url": ("STRING", {"default": "https://"}),
-                "audio_url": ("STRING", {"default": "https://"}),
-                "video_file": ("FILE", {"file_upload": True}),
-                "audio_file": ("FILE", {"file_upload": True}),
+                "video_url": ("STRING", {"default": ""}),
+                "audio_url": ("STRING", {"default": ""}),
+                "video_file": ("FILE", {"file_upload": True, "optional": True}),
+                "audio_file": ("FILE", {"file_upload": True, "optional": True}),
             },
         }
 
@@ -106,6 +106,12 @@ class VideoAudioLoader:
             audio_clip = AudioFileClip(audio_file)
         elif audio_url:
             audio_clip = AudioFileClip(audio_url)
+
+        # Kiểm tra nếu không có file hoặc URL nào được cung cấp
+        if not video_clip:
+            raise ValueError("You must provide either a video file or a video URL.")
+        if not audio_clip:
+            raise ValueError("You must provide either an audio file or an audio URL.")
 
         return (video_clip, audio_clip)
             
