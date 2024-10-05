@@ -270,6 +270,6 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CombineAudioVideoAndUpload": "Combine Audio and Video, Upload to Drive",
-    "VideoAudioLoader": "Load Video/Audio from URL or Upload"
+    "VideoAudioLoader": "Load Video/Audio from URL or Upload",
     "LoadAudioURL" "Load Audio from URL"
 }
