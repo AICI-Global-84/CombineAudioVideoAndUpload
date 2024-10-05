@@ -2,7 +2,7 @@ import os
 import tempfile
 import hashlib
 import soundfile as sf
-from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_audioclips, AudioClip
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -164,7 +164,6 @@ class CombineAudioVideoAndUpload:
             # Kiểm tra nếu temp_output_path đã được khởi tạo và xóa file tạm
             if temp_output_path and os.path.exists(temp_output_path):
                 os.unlink(temp_output_path)
-
 
 
 
