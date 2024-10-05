@@ -2,8 +2,7 @@ import os
 import tempfile
 import hashlib  # Thêm import này
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip
-from google.oauth2.credentials import Credentials
-from google.oauth2.service_account import ServiceAccountCredentials  # Thêm import này
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import json
@@ -57,8 +56,8 @@ class CombineAudioVideoAndUpload:
     def _initialize_drive_service(self):
         """Khởi tạo Google Drive service sử dụng Service Account."""
         try:
-            credentials = ServiceAccountCredentials.from_json_keyfile_name(
-                self.SERVICE_ACCOUNT_FILE, self.SCOPES)
+            credentials = Credentials.from_service_account_file(
+                self.SERVICE_ACCOUNT_FILE, scopes=self.SCOPES)
             self.drive_service = build('drive', 'v3', credentials=credentials)
         except Exception as e:
             print(f"Error initializing Drive service: {str(e)}")
@@ -183,6 +182,7 @@ class CombineAudioVideoAndUpload:
         m.update(str(start_duration).encode())
         m.update(str(end_duration).encode())
         return m.digest().hex()
+
 class VideoAudioLoader:
     """
     Node để tải video từ URL
