@@ -1,3 +1,7 @@
+import torchaudio
+import folder_paths
+import requests
+import io
 import os
 import tempfile
 import hashlib
@@ -166,7 +170,6 @@ class CombineAudioVideoAndUpload:
                 os.unlink(temp_output_path)
 
 
-
 class VideoAudioLoader:
     """
     Node để tải video từ URL
@@ -218,14 +221,55 @@ class VideoAudioLoader:
         import requests
         response = requests.get(url)
         return response.content  # Trả về nội dung của video
+        
+
+class LoadAudioURL:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {"audio_url": ("STRING", {"default": "https://example.com/audio.flac"})}}
+
+    CATEGORY = "audio"
+
+    RETURN_TYPES = ("AUDIO", )
+    FUNCTION = "load_from_url"
+
+    def load_from_url(self, audio_url):
+        # Download the audio file from the URL
+        response = requests.get(audio_url)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download audio from URL: {audio_url}")
+
+        # Load the audio from the downloaded content
+        audio_file = io.BytesIO(response.content)
+        waveform, sample_rate = torchaudio.load(audio_file)
+        audio = {"waveform": waveform.unsqueeze(0), "sample_rate": sample_rate}
+        return (audio, )
+
+    @classmethod
+    def IS_CHANGED(s, audio_url):
+        m = hashlib.sha256()
+        m.update(audio_url.encode('utf-8'))
+        return m.digest().hex()
+
+    @classmethod
+    def VALIDATE_INPUTS(s, audio_url):
+        try:
+            response = requests.head(audio_url)
+            if response.status_code != 200:
+                return f"Invalid audio URL: {audio_url}"
+        except Exception as e:
+            return f"Error accessing audio URL: {str(e)}"
+        return True
 
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
-    "VideoAudioLoader": VideoAudioLoader
+    "VideoAudioLoader": VideoAudioLoader,
+    "LoadAudioURL": LoadAudioURL
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CombineAudioVideoAndUpload": "Combine Audio and Video, Upload to Drive",
     "VideoAudioLoader": "Load Video/Audio from URL or Upload"
+    "LoadAudioURL" "Load Audio from URL"
 }
