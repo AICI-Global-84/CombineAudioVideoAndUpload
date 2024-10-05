@@ -8,19 +8,10 @@ from googleapiclient.http import MediaFileUpload
 import json
 
 class CombineAudioVideoAndUpload:
-    """
-    Node để kết hợp video và audio, sau đó upload lên Google Drive.
-    
-    Attributes:
-        SCOPES (list): Google Drive API scopes needed
-        SERVICE_ACCOUNT_FILE (str): Path to service account credentials file
-        DRIVE_FOLDER_ID (str): Google Drive folder ID to upload to
-    """
-    
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
     SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'  # Thay đổi path này
     DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'  # Thay đổi folder ID này
-
+    
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -56,13 +47,13 @@ class CombineAudioVideoAndUpload:
     def _initialize_drive_service(self):
         """Khởi tạo Google Drive service sử dụng Service Account."""
         try:
-            credentials = Credentials.from_service_account_file(
+            credentials = service_account.Credentials.from_service_account_file(
                 self.SERVICE_ACCOUNT_FILE, scopes=self.SCOPES)
             self.drive_service = build('drive', 'v3', credentials=credentials)
         except Exception as e:
             print(f"Error initializing Drive service: {str(e)}")
             raise RuntimeError(f"Failed to initialize Drive service: {str(e)}")
-
+            
     def _upload_to_drive(self, file_path):
         """Upload file lên Google Drive và trả về direct link."""
         try:
