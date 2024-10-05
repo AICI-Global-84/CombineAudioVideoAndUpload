@@ -77,67 +77,37 @@ class CombineAudioVideoAndUpload:
 
 class VideoAudioLoader:
     @classmethod
-    def INPUT_TYPES(cls):
-        input_dir = folder_paths.get_input_directory()
-        files = [f for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+    def INPUT_TYPES(s):
         return {
             "required": {
-                "file_type": (["Video", "Audio"], {"default": "Video", "tooltip": "Select whether to load video or audio."}),
-                "media": (sorted(files), {"file_upload": True, "tooltip": "Upload video or audio file from your computer."}),  # Nút để upload file
-                "url": ("STRING", {"default": "", "tooltip": "Enter URL of the video or audio file (optional)."})
-            }
+                "video_url": ("STRING", {"default": "https://"}),
+                "audio_url": ("STRING", {"default": "https://"}),
+                "video_file": ("FILE", {"file_upload": True}),
+                "audio_file": ("FILE", {"file_upload": True}),
+            },
         }
 
     CATEGORY = "media"
+
     RETURN_TYPES = ("VIDEO", "AUDIO")
-    RETURN_NAMES = ("video_output", "audio_output")
     FUNCTION = "load_media"
-    OUTPUT_NODE = True
 
-    def download_file(self, url, file_type="video"):
-        """Download video or audio file from URL."""
-        try:
-            response = requests.get(url)
-            file_extension = "mp4" if file_type == "video" else "mp3"
-            temp_dir = folder_paths.get_input_directory()
-            file_name = os.path.join(temp_dir, f"downloaded_file.{file_extension}")
-            with open(file_name, "wb") as file:
-                file.write(response.content)
-            return file_name
-        except Exception as e:
-            print(f"Error downloading file from {url}: {e}")
-            return None
+    def load_media(self, video_url=None, audio_url=None, video_file=None, audio_file=None):
+        video_clip, audio_clip = None, None
 
-    def load_media(self, file_type="Video", media=None, url=""):
-        file_path = None
+        # Load video from uploaded file or URL
+        if video_file:
+            video_clip = VideoFileClip(video_file)
+        elif video_url:
+            video_clip = VideoFileClip(video_url)
 
-        # Kiểm tra file upload hoặc URL
-        if media:
-            file_path = folder_paths.get_annotated_filepath(media)
-        elif url:
-            file_path = self.download_file(url, file_type=file_type.lower())
-        else:
-            raise ValueError("Either a file must be uploaded or a URL must be provided.")
+        # Load audio from uploaded file or URL
+        if audio_file:
+            audio_clip = AudioFileClip(audio_file)
+        elif audio_url:
+            audio_clip = AudioFileClip(audio_url)
 
-        # Xử lý video hoặc audio tùy theo lựa chọn
-        if file_type == "Video":
-            video_clip = VideoFileClip(file_path)
-            audio_clip = video_clip.audio
-            return video_clip, audio_clip
-        elif file_type == "Audio":
-            audio_clip = AudioFileClip(file_path)
-            return None, audio_clip
-
-    @classmethod
-    def IS_CHANGED(cls, media):
-        file_path = folder_paths.get_annotated_filepath(media)
-        return os.path.exists(file_path)
-
-    @classmethod
-    def VALIDATE_INPUTS(cls, media):
-        if not folder_paths.exists_annotated_filepath(media):
-            return "Invalid media file: {}".format(media)
-        return True
+        return (video_clip, audio_clip)
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
