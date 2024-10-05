@@ -104,10 +104,11 @@ class CombineAudioVideoAndUpload:
             # Nếu audio là dạng tensor, lưu nó ra file .wav
             if isinstance(audio, dict) and 'waveform' in audio and 'sample_rate' in audio:
                 waveform = audio['waveform'].numpy()  # Chuyển tensor thành numpy array
+                waveform = waveform.squeeze()  # Loại bỏ chiều không cần thiết
                 sample_rate = audio['sample_rate']
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio_file:
-                    sf.write(temp_audio_file.name, waveform.T, sample_rate)  # Lưu audio ra file wav
+                    sf.write(temp_audio_file.name, waveform, sample_rate)  # Lưu audio ra file wav
                     temp_audio_path = temp_audio_file.name
 
                 audio_clip = AudioFileClip(temp_audio_path)
