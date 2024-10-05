@@ -247,16 +247,6 @@ class VideoAudioLoader:
         response = requests.get(url)
         return response.content  # Trả về nội dung của video
 
-# Thêm các định nghĩa cho node
-NODE_CLASS_MAPPINGS = {
-    "VideoAudioLoader": VideoAudioLoader
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "VideoAudioLoader": "Video Loader"
-}
-
-
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
