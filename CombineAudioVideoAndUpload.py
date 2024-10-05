@@ -11,7 +11,7 @@ class CombineAudioVideoAndUpload:
     SCOPES = ['https://www.googleapis.com/auth/drive.file']
     SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'
     DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'
-    
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -82,6 +82,8 @@ class CombineAudioVideoAndUpload:
         """
         Kết hợp video và audio, sau đó upload lên Drive.
         """
+        temp_output_path = None  # Khởi tạo biến temp_output_path để tránh lỗi UnboundLocalError
+
         try:
             # Debug: In loại dữ liệu và giá trị của video và audio
             print(f"Video input type: {type(video)}")
@@ -89,9 +91,12 @@ class CombineAudioVideoAndUpload:
             print(f"Video input: {video}")
             print(f"Audio input: {audio}")
 
-            # Kiểm tra xem video có đúng định dạng và chứa 'path' không
-            if isinstance(video, dict) and 'path' in video:
-                video_clip = VideoFileClip(video['path'])
+            # Lưu video byte vào file tạm thời nếu video là dạng byte
+            if isinstance(video, bytes):
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_video_file:
+                    temp_video_file.write(video)
+                    temp_video_path = temp_video_file.name
+                    video_clip = VideoFileClip(temp_video_path)
             else:
                 raise TypeError(f"Invalid video input: {video}")
 
@@ -138,18 +143,9 @@ class CombineAudioVideoAndUpload:
             raise RuntimeError(f"Failed to combine video and audio: {str(e)}")
 
         finally:
-            for path in [temp_output_path]:
-                if os.path.exists(path):
-                    os.unlink(path)
-
-    @classmethod
-    def IS_CHANGED(s, video, audio, start_duration, end_duration):
-        m = hashlib.sha256()
-        m.update(str(video).encode())
-        m.update(str(audio).encode())
-        m.update(str(start_duration).encode())
-        m.update(str(end_duration).encode())
-        return m.digest().hex()
+            # Kiểm tra nếu temp_output_path đã được khởi tạo và xóa file tạm
+            if temp_output_path and os.path.exists(temp_output_path):
+                os.unlink(temp_output_path)
 
 class VideoAudioLoader:
     """
