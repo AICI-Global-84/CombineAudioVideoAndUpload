@@ -21,8 +21,8 @@ class CombineAudioVideoAndUpload:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video": ("VIDEO", {"tooltip": "The input video file."}),
-                "audio": ("AUDIO", {"tooltip": "The input audio file."}),
+                "video": ("ANY", {"tooltip": "The input video file."}),  # Thay FILE thành ANY
+                "audio": ("ANY", {"tooltip": "The input audio file."}),  # Thay FILE thành ANY
                 "start_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video starts before audio."}),
                 "end_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video ends after audio."})
             }
@@ -61,30 +61,30 @@ class CombineAudioVideoAndUpload:
             print(f"An error occurred while uploading to Google Drive: {e}")
             return None
 
-    def download_file(self, url):
-        """Download file from the given URL and return the local filename."""
-        local_filename = url.split('/')[-1]
-        with requests.get(url, stream=True) as r:
-            r.raise_for_status()
-            with open(local_filename, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192): 
-                    f.write(chunk)
-        return local_filename
-
     def combine_and_upload(self, video, audio, start_duration=0, end_duration=0):
         output_file = "/tmp/combined_output.mp4"
 
-        # Kiểm tra kiểu dữ liệu và tải file nếu cần
-        if isinstance(video, str) and video.startswith('http'):
-            video = self.download_file(video)
-        
-        if isinstance(audio, str) and audio.startswith('http'):
-            audio = self.download_file(audio)
+        # Kiểm tra kiểu dữ liệu cho video
+        if isinstance(video, bytes):
+            with open("/tmp/temp_video.mp4", "wb") as f:
+                f.write(video)
+            video_path = "/tmp/temp_video.mp4"
+        elif isinstance(video, str):
+            video_path = video
+        else:
+            raise ValueError("video must be of type str or bytes.")
 
-        if not isinstance(video, str) or not isinstance(audio, str):
-            raise ValueError("video and audio must be of type str.")
+        # Kiểm tra kiểu dữ liệu cho audio
+        if isinstance(audio, bytes):
+            with open("/tmp/temp_audio.mp3", "wb") as f:
+                f.write(audio)
+            audio_path = "/tmp/temp_audio.mp3"
+        elif isinstance(audio, str):
+            audio_path = audio
+        else:
+            raise ValueError("audio must be of type str or bytes.")
 
-        self.combine_video_audio(video, audio, start_duration, end_duration, output_file)
+        self.combine_video_audio(video_path, audio_path, start_duration, end_duration, output_file)
 
         public_file_url = self.upload_to_google_drive(output_file)
         if not public_file_url:
