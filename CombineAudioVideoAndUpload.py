@@ -1,11 +1,5 @@
 import os
-import hashlib
-import torchaudio
-import cv2
-import numpy as np
-import torch
 import requests
-from folder_paths import get_input_directory, filter_files_content_types, get_annotated_filepath, exists_annotated_filepath  # Nhập từ folder_paths.py
 import moviepy.editor as mp
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -27,8 +21,8 @@ class CombineAudioVideoAndUpload:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "video": ("VIDEO", {"tooltip": "The input video file."}),  # Thay FILE thành VIDEO
-                "audio": ("AUDIO", {"tooltip": "The input audio file."}),  # Thay FILE thành AUDIO
+                "video": ("VIDEO", {"tooltip": "The input video file."}),
+                "audio": ("AUDIO", {"tooltip": "The input audio file."}),
                 "start_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video starts before audio."}),
                 "end_duration": ("FLOAT", {"default": 0, "tooltip": "The time (in seconds) the video ends after audio."})
             }
@@ -67,8 +61,28 @@ class CombineAudioVideoAndUpload:
             print(f"An error occurred while uploading to Google Drive: {e}")
             return None
 
+    def download_file(self, url):
+        """Download file from the given URL and return the local filename."""
+        local_filename = url.split('/')[-1]
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(local_filename, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): 
+                    f.write(chunk)
+        return local_filename
+
     def combine_and_upload(self, video, audio, start_duration=0, end_duration=0):
         output_file = "/tmp/combined_output.mp4"
+
+        # Kiểm tra kiểu dữ liệu và tải file nếu cần
+        if isinstance(video, str) and video.startswith('http'):
+            video = self.download_file(video)
+        
+        if isinstance(audio, str) and audio.startswith('http'):
+            audio = self.download_file(audio)
+
+        if not isinstance(video, str) or not isinstance(audio, str):
+            raise ValueError("video and audio must be of type str.")
 
         self.combine_video_audio(video, audio, start_duration, end_duration, output_file)
 
