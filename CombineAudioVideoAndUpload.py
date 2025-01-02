@@ -286,7 +286,7 @@ class CombineAudio:
                 }),
                 "start_duration": ("FLOAT", {
                     "default": 0.0,
-                    "min": -60.0,  # Cho phép âm
+                    "min": -60.0,
                     "max": 60.0,
                     "step": 0.1,
                     "display": "number"
@@ -313,29 +313,28 @@ class CombineAudio:
                 start_duration, 
                 end_duration):
         """
-        Trộn voice (anchor) với music:
-        - start_duration: music bắt đầu sớm/trễ so với voice
-            + < 0 => music phát trước voice
-            + = 0 => cùng bắt đầu
-            + > 0 => music phát sau voice
-        - end_duration: music kết thúc trễ hơn voice n giây
-        - voice_volume, music_volume: điều chỉnh âm lượng
+        ...
         """
         try:
-            # Lấy waveform & sample_rate cho voice
-            voice_waveform = voice["waveform"].squeeze(0)  # [channels, samples] hoặc [samples]
+            voice_waveform = voice["waveform"].squeeze(0)
             sr_voice = voice["sample_rate"]
 
-            # Lấy waveform & sample_rate cho music
             music_waveform = music["waveform"].squeeze(0)
             sr_music = music["sample_rate"]
 
-            # Kiểm tra sample_rate
+            # Thay vì raise, ta resample
             if sr_voice != sr_music:
-                # Nếu khác, có thể resample, hoặc raise lỗi
-                raise ValueError("Voice và Music có sample_rate khác nhau. Cần resample trước khi trộn.")
+                target_sr = max(sr_voice, sr_music)
+                if sr_voice != target_sr:
+                    transform = torchaudio.transforms.Resample(sr_voice, target_sr)
+                    voice_waveform = transform(voice_waveform.unsqueeze(0)).squeeze(0)
+                    sr_voice = target_sr
+                if sr_music != target_sr:
+                    transform = torchaudio.transforms.Resample(sr_music, target_sr)
+                    music_waveform = transform(music_waveform.unsqueeze(0)).squeeze(0)
+                    sr_music = target_sr
 
-            sr = sr_voice  # Dùng chung 1 sample_rate
+            sr = sr_voice
 
             # Đưa mọi thứ về mono để xử lý đơn giản (nếu muốn giữ stereo, cần code phức tạp hơn)
             if voice_waveform.ndim > 1:
@@ -462,6 +461,10 @@ class CombineAudio:
             "waveform": final_torch,
             "sample_rate": sr
         }, )
+
+        except Exception as e:
+            raise RuntimeError(f"Lỗi khi trộn audio: {str(e)}")
+
 
     @classmethod
     def IS_CHANGED(s, 
