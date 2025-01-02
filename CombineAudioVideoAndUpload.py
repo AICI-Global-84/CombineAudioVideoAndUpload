@@ -458,9 +458,9 @@ class CombineAudio:
             final_torch = torchaudio.functional.to_tensor(np_audio_mono.squeeze()).unsqueeze(0)
 
         return ({
-            "waveform": final_torch,
-            "sample_rate": sr
-        }, )
+                "waveform": final_torch,
+                "sample_rate": sr
+            }, )
 
         except Exception as e:
             raise RuntimeError(f"Lỗi khi trộn audio: {str(e)}")
