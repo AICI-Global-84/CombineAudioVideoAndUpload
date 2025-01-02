@@ -352,21 +352,6 @@ class CombineAudio:
             music_start = start_duration    # giây
             music_end   = voice_len + end_duration  # music kết thúc muộn hơn voice end_duration giây
 
-            # 1) Tính subclip của music (theo timeline final):
-            #    - Nếu music_start < 0, ta bỏ qua phần ban đầu của music (-music_start giây)
-            #    - Nếu music_end > music_len, music cũng chỉ có tối đa music_len
-            # 
-            # => ta muốn music chạy trong đoạn [music_start, music_end] (theo timeline final)
-            #    map ngược về music waveform gốc => [0, music_len]
-            # 
-            # => Subclip music: 
-            #    start_in_music = -music_start (nếu music_start < 0), 
-            #                     0 nếu music_start >= 0
-            #    end_in_music   = start_in_music + (music_end - music_start)
-            # 
-            #    nhưng phải cắt tối đa = music_len
-
-            # Tính start_in_music (giây) và end_in_music (giây)
             if music_start < 0:
                 start_in_music = -music_start
             else:
@@ -395,10 +380,6 @@ class CombineAudio:
             # Subclip waveform của music
             music_subclip = music_waveform[start_sample:end_sample]
 
-            # Tính offset của music_subclip trong final mix
-            # music_start >= 0 => music vào trễ => offset = music_start
-            # music_start < 0  => voice vào trễ => offset = 0 (vì voice ở 0), 
-            #                     music_subclip thực ra đã bị cắt bớt phần đầu
             if music_start < 0:
                 music_offset_in_final = 0  # music khởi đầu ngay tại voice = 0 (nhưng thực ra cắt bớt
             else:
@@ -407,10 +388,6 @@ class CombineAudio:
             # Tính độ dài voice (samples)
             voice_len_samples = voice_waveform.shape[-1]
 
-            # Tính độ dài final mix
-            # voice_end = voice_len_samples
-            # music_end_in_final = music_offset_in_final + music_subclip.shape[-1]
-            # Nhưng ta cũng cần xem music_end (giây) so với voice_len
             final_len_samples = max(
                 voice_len_samples,  # voice
                 music_offset_in_final + music_subclip.shape[-1]  # music
