@@ -265,6 +265,11 @@ class LoadAudioURL:
 
 
 class CombineAudio:
+    # Thêm các hằng số cho Google Drive
+    SCOPES = ['https://www.googleapis.com/auth/drive.file']
+    SERVICE_ACCOUNT_FILE = '/content/drive/My Drive/SD-Data/comfyui-n8n-aici01-7679b55c962b.json'
+    DRIVE_FOLDER_ID = '1fZyeDT_eW6ozYXhqi_qLVy-Xnu5JD67a'
+
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -302,9 +307,57 @@ class CombineAudio:
             }
         }
 
-    RETURN_TYPES = ("AUDIO", )
+    # Sửa RETURN_TYPES để kèm theo link drive
+    RETURN_TYPES = ("AUDIO", "STRING", )
+    RETURN_NAMES = ("audio_output", "drive_url", )
     FUNCTION = "combine"
     CATEGORY = "audio"
+
+    def __init__(self):
+        self.drive_service = None
+        self._initialize_drive_service()
+
+    def _initialize_drive_service(self):
+        """
+        Khởi tạo Drive service, tương tự CombineAudioVideoAndUpload
+        """
+        try:
+            credentials = service_account.Credentials.from_service_account_file(
+                self.SERVICE_ACCOUNT_FILE,
+                scopes=self.SCOPES
+            )
+            self.drive_service = build('drive', 'v3', credentials=credentials)
+        except Exception as e:
+            print(f"Error initializing Drive service: {str(e)}")
+            raise RuntimeError(f"Failed to initialize Drive service: {str(e)}")
+
+    def _upload_to_drive(self, file_path):
+        """
+        Upload file lên Google Drive, rồi trả về link chia sẻ.
+        """
+        try:
+            file_metadata = {
+                'name': os.path.basename(file_path),
+                'parents': [self.DRIVE_FOLDER_ID]
+            }
+            media = MediaFileUpload(file_path, resumable=True)
+            file = self.drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+            # Set quyền chia sẻ file cho anyone with the link
+            self.drive_service.permissions().create(
+                fileId=file.get('id'),
+                body={'type': 'anyone', 'role': 'reader'},
+                fields='id'
+            ).execute()
+
+            file_id = file.get('id')
+            return f"https://drive.google.com/uc?id={file_id}"
+        except Exception as e:
+            raise RuntimeError(f"Failed to upload to Drive: {str(e)}")
 
     def combine(self, 
                 voice, 
@@ -315,8 +368,11 @@ class CombineAudio:
                 end_duration):
         """
         Ví dụ logic: voice là anchor, music được canh chỉnh start/end.
+        Sau khi trộn, ta lưu ra file WAV tạm, upload lên drive và lấy link.
         """
+        temp_output_path = None
         try:
+            # Lấy voice và music waveform
             voice_waveform = voice["waveform"].squeeze(0)
             sr_voice = voice["sample_rate"]
 
@@ -337,7 +393,7 @@ class CombineAudio:
 
             sr = sr_voice
 
-            # Đưa mọi thứ về mono để xử lý đơn giản (nếu muốn giữ stereo, cần code phức tạp hơn)
+            # Đưa về mono nếu cần
             if voice_waveform.ndim > 1:
                 voice_waveform = voice_waveform.mean(dim=0)
             if music_waveform.ndim > 1:
@@ -348,30 +404,30 @@ class CombineAudio:
             music_len = music_waveform.shape[-1] / sr
 
             # Voice luôn bắt đầu ở t=0 trong final mix
-            # => ta xét music_start = start_duration (có thể âm, dương, hoặc 0)
-            music_start = start_duration    # giây
-            music_end   = voice_len + end_duration  # music kết thúc muộn hơn voice end_duration giây
+            music_start = start_duration
+            music_end   = voice_len + end_duration
 
             if music_start < 0:
                 start_in_music = -music_start
             else:
                 start_in_music = 0.0
 
-            desired_duration = music_end - music_start  # khoảng thời gian ta muốn có music
+            desired_duration = music_end - music_start
             if desired_duration <= 0:
-                # end < start => voice quá dài, hoặc end_duration < -start_duration ...
-                # => music không kịp phát, ta trả về voice mà không có music
-                return self._return_mono_audio(voice_waveform * voice_volume, sr)
+                # Không có chỗ để phát music
+                final_audio = self._return_mono_audio(voice_waveform * voice_volume, sr)
+                # Lưu file tạm, upload Drive, return
+                drive_url = self._save_and_upload_audio(final_audio[0]["waveform"], sr)
+                return (final_audio[0], drive_url)
 
             end_in_music = start_in_music + desired_duration
-
-            # Giới hạn subclip không vượt quá music_len
             end_in_music = min(end_in_music, music_len)
 
             if start_in_music >= music_len or end_in_music <= 0:
-                # Trường hợp music không còn gì để phát
-                # => Chỉ có voice
-                return self._return_mono_audio(voice_waveform * voice_volume, sr)
+                # Không còn gì để phát từ music
+                final_audio = self._return_mono_audio(voice_waveform * voice_volume, sr)
+                drive_url = self._save_and_upload_audio(final_audio[0]["waveform"], sr)
+                return (final_audio[0], drive_url)
 
             # Convert to sample
             start_sample = int(start_in_music * sr)
@@ -381,42 +437,43 @@ class CombineAudio:
             music_subclip = music_waveform[start_sample:end_sample]
 
             if music_start < 0:
-                music_offset_in_final = 0  # music khởi đầu ngay tại voice = 0 (nhưng thực ra cắt bớt
+                music_offset_in_final = 0
             else:
                 music_offset_in_final = int(music_start * sr)
 
-            # Tính độ dài voice (samples)
             voice_len_samples = voice_waveform.shape[-1]
-
             final_len_samples = max(
-                voice_len_samples,  # voice
-                music_offset_in_final + music_subclip.shape[-1]  # music
+                voice_len_samples,
+                music_offset_in_final + music_subclip.shape[-1]
             )
 
-            # Khởi tạo final mix mono
+            # Khởi tạo final mix
             final_mix = np.zeros(final_len_samples, dtype=np.float32)
 
-            # Thêm voice vào final mix (volume)
+            # Thêm voice
             voice_np = voice_waveform.numpy() * voice_volume
             final_mix[:voice_len_samples] += voice_np[:final_len_samples]
 
-            # Thêm music subclip vào final mix (volume)
+            # Thêm music
             music_np = music_subclip.numpy() * music_volume
-
             end_index = music_offset_in_final + music_np.shape[-1]
             if end_index > final_len_samples:
                 end_index = final_len_samples
 
             final_mix[music_offset_in_final:end_index] += music_np[:(end_index - music_offset_in_final)]
 
-            # Chuyển final_mix -> tensor
+            # Chuyển final_mix -> AUDIO format (mono)
             final_torch = torch.from_numpy(final_mix).unsqueeze(0)
-
-            # Trả về AUDIO format cho ComfyUI
-            return ({
+            audio_dict = {
                 "waveform": final_torch,
                 "sample_rate": sr
-            }, )
+            }
+
+            # Lưu file tạm để upload Drive
+            drive_url = self._save_and_upload_audio(final_torch, sr)
+
+            # Return (AUDIO, STRING)
+            return (audio_dict, drive_url)
 
         except Exception as e:
             raise RuntimeError(f"Lỗi khi trộn audio: {str(e)}")
@@ -429,10 +486,8 @@ class CombineAudio:
             np_audio_mono = np_audio_mono.numpy()
 
         if np_audio_mono.ndim == 1:
-            # shape [samples]
             final_torch = torchaudio.functional.to_tensor(np_audio_mono).unsqueeze(0)
         else:
-            # shape [samples, ...] -> ép về [samples]
             final_torch = torchaudio.functional.to_tensor(np_audio_mono.squeeze()).unsqueeze(0)
 
         return ({
@@ -440,6 +495,25 @@ class CombineAudio:
             "sample_rate": sr
         }, )
 
+    def _save_and_upload_audio(self, audio_torch, sr):
+        """
+        Ghi waveform ra file WAV tạm và upload lên Drive, trả về link.
+        """
+        temp_file = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                temp_file = tmp.name
+            # Chuyển tensor -> numpy
+            audio_np = audio_torch.squeeze(0).numpy()
+            sf.write(temp_file, audio_np, sr)
+
+            # Upload
+            drive_url = self._upload_to_drive(temp_file)
+            return drive_url
+        finally:
+            # Xoá file tạm
+            if temp_file and os.path.exists(temp_file):
+                os.unlink(temp_file)
 
     @classmethod
     def IS_CHANGED(s, 
