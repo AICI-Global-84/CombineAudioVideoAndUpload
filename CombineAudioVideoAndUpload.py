@@ -5,6 +5,7 @@ import io
 import os
 import tempfile
 import hashlib
+import numpy as np
 import soundfile as sf
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_audioclips, AudioClip
 from google.oauth2 import service_account
@@ -261,15 +262,241 @@ class LoadAudioURL:
             return f"Error accessing audio URL: {str(e)}"
         return True
 
+
+class CombineAudio:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "voice": ("AUDIO", ),
+                "music": ("AUDIO", ),
+                "voice_volume": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "display": "number"
+                }),
+                "music_volume": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 10.0,
+                    "step": 0.1,
+                    "display": "number"
+                }),
+                "start_duration": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -60.0,  # Cho phép âm
+                    "max": 60.0,
+                    "step": 0.1,
+                    "display": "number"
+                }),
+                "end_duration": ("FLOAT", {
+                    "default": 0.0,
+                    "min": 0.0,
+                    "max": 60.0,
+                    "step": 0.1,
+                    "display": "number"
+                }),
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO", )
+    FUNCTION = "combine"
+    CATEGORY = "audio"
+
+    def combine(self, 
+                voice, 
+                music, 
+                voice_volume, 
+                music_volume, 
+                start_duration, 
+                end_duration):
+        """
+        Trộn voice (anchor) với music:
+        - start_duration: music bắt đầu sớm/trễ so với voice
+            + < 0 => music phát trước voice
+            + = 0 => cùng bắt đầu
+            + > 0 => music phát sau voice
+        - end_duration: music kết thúc trễ hơn voice n giây
+        - voice_volume, music_volume: điều chỉnh âm lượng
+        """
+        try:
+            # Lấy waveform & sample_rate cho voice
+            voice_waveform = voice["waveform"].squeeze(0)  # [channels, samples] hoặc [samples]
+            sr_voice = voice["sample_rate"]
+
+            # Lấy waveform & sample_rate cho music
+            music_waveform = music["waveform"].squeeze(0)
+            sr_music = music["sample_rate"]
+
+            # Kiểm tra sample_rate
+            if sr_voice != sr_music:
+                # Nếu khác, có thể resample, hoặc raise lỗi
+                raise ValueError("Voice và Music có sample_rate khác nhau. Cần resample trước khi trộn.")
+
+            sr = sr_voice  # Dùng chung 1 sample_rate
+
+            # Đưa mọi thứ về mono để xử lý đơn giản (nếu muốn giữ stereo, cần code phức tạp hơn)
+            if voice_waveform.ndim > 1:
+                voice_waveform = voice_waveform.mean(dim=0)
+            if music_waveform.ndim > 1:
+                music_waveform = music_waveform.mean(dim=0)
+
+            # Tính độ dài (giây) của voice và music
+            voice_len = voice_waveform.shape[-1] / sr
+            music_len = music_waveform.shape[-1] / sr
+
+            # Voice luôn bắt đầu ở t=0 trong final mix
+            # => ta xét music_start = start_duration (có thể âm, dương, hoặc 0)
+            music_start = start_duration    # giây
+            music_end   = voice_len + end_duration  # music kết thúc muộn hơn voice end_duration giây
+
+            # 1) Tính subclip của music (theo timeline final):
+            #    - Nếu music_start < 0, ta bỏ qua phần ban đầu của music (-music_start giây)
+            #    - Nếu music_end > music_len, music cũng chỉ có tối đa music_len
+            # 
+            # => ta muốn music chạy trong đoạn [music_start, music_end] (theo timeline final)
+            #    map ngược về music waveform gốc => [0, music_len]
+            # 
+            # => Subclip music: 
+            #    start_in_music = -music_start (nếu music_start < 0), 
+            #                     0 nếu music_start >= 0
+            #    end_in_music   = start_in_music + (music_end - music_start)
+            # 
+            #    nhưng phải cắt tối đa = music_len
+
+            # Tính start_in_music (giây) và end_in_music (giây)
+            if music_start < 0:
+                start_in_music = -music_start
+            else:
+                start_in_music = 0.0
+
+            desired_duration = music_end - music_start  # khoảng thời gian ta muốn có music
+            if desired_duration <= 0:
+                # end < start => voice quá dài, hoặc end_duration < -start_duration ...
+                # => music không kịp phát, ta trả về voice mà không có music
+                return self._return_mono_audio(voice_waveform * voice_volume, sr)
+
+            end_in_music = start_in_music + desired_duration
+
+            # Giới hạn subclip không vượt quá music_len
+            end_in_music = min(end_in_music, music_len)
+
+            if start_in_music >= music_len or end_in_music <= 0:
+                # Trường hợp music không còn gì để phát
+                # => Chỉ có voice
+                return self._return_mono_audio(voice_waveform * voice_volume, sr)
+
+            # Convert to sample
+            start_sample = int(start_in_music * sr)
+            end_sample   = int(end_in_music * sr)
+
+            # Subclip waveform của music
+            music_subclip = music_waveform[start_sample:end_sample]
+
+            # Tính offset của music_subclip trong final mix
+            # music_start >= 0 => music vào trễ => offset = music_start
+            # music_start < 0  => voice vào trễ => offset = 0 (vì voice ở 0), 
+            #                     music_subclip thực ra đã bị cắt bớt phần đầu
+            if music_start < 0:
+                music_offset_in_final = 0  # music khởi đầu ngay tại voice = 0 (nhưng thực ra cắt bớt
+            else:
+                music_offset_in_final = int(music_start * sr)
+
+            # Tính độ dài voice (samples)
+            voice_len_samples = voice_waveform.shape[-1]
+
+            # Tính độ dài final mix
+            # voice_end = voice_len_samples
+            # music_end_in_final = music_offset_in_final + music_subclip.shape[-1]
+            # Nhưng ta cũng cần xem music_end (giây) so với voice_len
+            final_len_samples = max(
+                voice_len_samples,  # voice
+                music_offset_in_final + music_subclip.shape[-1]  # music
+            )
+
+            # Khởi tạo final mix mono
+            final_mix = np.zeros(final_len_samples, dtype=np.float32)
+
+            # Thêm voice vào final mix (volume)
+            voice_np = voice_waveform.numpy() * voice_volume
+            final_mix[:voice_len_samples] += voice_np[:final_len_samples]
+
+            # Thêm music subclip vào final mix (volume)
+            music_np = music_subclip.numpy() * music_volume
+
+            end_index = music_offset_in_final + music_np.shape[-1]
+            if end_index > final_len_samples:
+                end_index = final_len_samples
+
+            final_mix[music_offset_in_final:end_index] += music_np[:(end_index - music_offset_in_final)]
+
+            # Chuyển final_mix -> tensor
+            final_torch = torchaudio.functional.to_tensor(final_mix).unsqueeze(0)
+
+            # Trả về AUDIO format cho ComfyUI
+            return ({
+                "waveform": final_torch,
+                "sample_rate": sr
+            }, )
+
+        except Exception as e:
+            raise RuntimeError(f"Lỗi khi trộn audio: {str(e)}")
+
+    def _return_mono_audio(self, np_audio_mono, sr):
+        """
+        Tiện ích để trả về một AUDIO dictionary dạng mono
+        """
+        if not isinstance(np_audio_mono, np.ndarray):
+            np_audio_mono = np_audio_mono.numpy()
+
+        if np_audio_mono.ndim == 1:
+            # shape [samples]
+            final_torch = torchaudio.functional.to_tensor(np_audio_mono).unsqueeze(0)
+        else:
+            # shape [samples, ...] -> ép về [samples]
+            final_torch = torchaudio.functional.to_tensor(np_audio_mono.squeeze()).unsqueeze(0)
+
+        return ({
+            "waveform": final_torch,
+            "sample_rate": sr
+        }, )
+
+    @classmethod
+    def IS_CHANGED(s, 
+                   voice, 
+                   music, 
+                   voice_volume, 
+                   music_volume, 
+                   start_duration, 
+                   end_duration):
+        """
+        Hàm băm đầu vào để xác định node có thay đổi gì không (ComfyUI dùng để cache).
+        """
+        m = hashlib.sha256()
+        # Băm một số đặc tính
+        m.update(str(voice["sample_rate"]).encode('utf-8'))
+        m.update(str(voice["waveform"].shape).encode('utf-8'))
+        m.update(str(music["sample_rate"]).encode('utf-8'))
+        m.update(str(music["waveform"].shape).encode('utf-8'))
+        m.update(str(voice_volume).encode('utf-8'))
+        m.update(str(music_volume).encode('utf-8'))
+        m.update(str(start_duration).encode('utf-8'))
+        m.update(str(end_duration).encode('utf-8'))
+        return m.digest().hex()
+
             
 NODE_CLASS_MAPPINGS = {
     "CombineAudioVideoAndUpload": CombineAudioVideoAndUpload,
     "VideoAudioLoader": VideoAudioLoader,
-    "LoadAudioURL": LoadAudioURL
+    "LoadAudioURL": LoadAudioURL,
+    "CombineAudio": CombineAudio
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CombineAudioVideoAndUpload": "Combine Audio and Video, Upload to Drive",
     "VideoAudioLoader": "Load Video/Audio from URL or Upload",
-    "LoadAudioURL": "Load Audio from URL"
+    "LoadAudioURL": "Load Audio from URL",
+    "CombineAudio": "Combine Two Audios (Music offsets w.r.t Voice)"
 }
