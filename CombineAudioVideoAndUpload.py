@@ -1,4 +1,5 @@
 import torchaudio
+import torch
 import folder_paths
 import requests
 import io
@@ -313,7 +314,7 @@ class CombineAudio:
                 start_duration, 
                 end_duration):
         """
-        ...
+        Ví dụ logic: voice là anchor, music được canh chỉnh start/end.
         """
         try:
             voice_waveform = voice["waveform"].squeeze(0)
@@ -322,7 +323,7 @@ class CombineAudio:
             music_waveform = music["waveform"].squeeze(0)
             sr_music = music["sample_rate"]
 
-            # Thay vì raise, ta resample
+            # Nếu cần auto-resample, code như bên dưới:
             if sr_voice != sr_music:
                 target_sr = max(sr_voice, sr_music)
                 if sr_voice != target_sr:
@@ -432,7 +433,7 @@ class CombineAudio:
             final_mix[music_offset_in_final:end_index] += music_np[:(end_index - music_offset_in_final)]
 
             # Chuyển final_mix -> tensor
-            final_torch = torchaudio.functional.to_tensor(final_mix).unsqueeze(0)
+            final_torch = torch.from_numpy(final_mix).unsqueeze(0)
 
             # Trả về AUDIO format cho ComfyUI
             return ({
