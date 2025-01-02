@@ -367,10 +367,13 @@ class CombineAudio:
                 start_duration, 
                 end_duration):
         """
-        start_duration > 0:  music bắt đầu trễ hơn voice
-        start_duration = 0:  music & voice bắt đầu cùng lúc
-        start_duration < 0:  music bắt đầu sớm hơn voice (ví dụ -3)
-        end_duration:        nhạc kéo dài (hoặc cắt sớm) sau voice (nếu muốn)
+        start_duration > 0:  nhạc bắt đầu trễ hơn voice
+        start_duration = 0:  nhạc & voice bắt đầu cùng lúc
+        start_duration < 0:  nhạc bắt đầu sớm hơn voice (ví dụ -3)
+        
+        end_duration >= 0:
+            - 0   => dừng nhạc đúng lúc voice kết thúc
+            - >0  => tiếp tục phát thêm end_duration giây sau khi voice kết thúc (nếu nhạc đủ dài)
         """
         try:
             # Lấy voice và music waveform
@@ -402,82 +405,87 @@ class CombineAudio:
     
             voice_len_samples = voice_waveform.shape[-1]
             music_len_samples = music_waveform.shape[-1]
-            voice_len_sec = voice_len_samples / sr
-            music_len_sec = music_len_samples / sr
     
-            # ------------------------------
-            # Tính offset cho voice và music
-            # ------------------------------
+            #======================================================================
+            # 1) Tính OFFSET của voice và music trong final mix
+            #======================================================================
             if start_duration >= 0:
-                # Voice ở t=0, Music ở t=start_duration
+                # Voice tại mốc 0, Music lùi về sau start_duration
                 voice_offset_in_final = 0
                 music_offset_in_final = int(start_duration * sr)
             else:
-                # Music ở t=0, Voice ở t = -start_duration (VD: -(-3) = 3)
+                # Music tại mốc 0, Voice lùi về sau -start_duration
                 music_offset_in_final = 0
                 voice_offset_in_final = int(-start_duration * sr)
     
-            # Tính độ dài cuối cùng của bản mix (tính cả end_duration)
-            # Voice sẽ kết thúc ở voice_offset_in_final + voice_len_samples
-            # => voice_end_time = voice_offset_in_final + voice_len_samples
-            # Music "có thể" muốn kéo dài thêm end_duration sau voice => 
-            #   ta thay đổi music_end_time nếu cần. 
-            #
-            # Ở ví dụ này, ta hiểu end_duration là "kéo nhạc" thêm X giây sau khi voice kết thúc".
-            # => music_end_time = music_offset_in_final + music_len_samples,
-            #                    nhưng ta có thể nới music thêm end_duration (nếu music_len dài đủ).
-            #
-            # Thông thường, ta sẽ cắt final mix tại max(voice_end_time, music_end_time).
-            # Tuỳ mục đích, bạn có thể hiệu chỉnh logic cắt nhạc.
-            
+            #======================================================================
+            # 2) Tính thời điểm voice kết thúc
+            #======================================================================
             voice_end_sample = voice_offset_in_final + voice_len_samples
-            # Cho rằng music sẽ kết thúc >= voice_end + end_duration (nếu music đủ dài),
-            #   ta chỉ cắt nhạc nếu music không đủ dài.
-            music_end_sample = music_offset_in_final + music_len_samples
-            desired_end_sample = voice_end_sample + int(end_duration * sr)
+        
+            desired_music_end_sample = voice_end_sample + int(end_duration * sr)
     
-            final_len_samples = max(voice_end_sample, desired_end_sample, music_end_sample)
+            music_end_sample_raw = music_offset_in_final + music_len_samples
+            music_end_sample     = min(music_end_sample_raw, desired_music_end_sample)
+    
+            # Lưu ý: nếu music_end_sample < music_offset_in_final => đồng nghĩa start > end => ko phát
+            if music_end_sample <= music_offset_in_final:
+                # => Music bị cắt toàn bộ, chỉ còn voice
+                final_len_samples = voice_end_sample  # voice
+            else:
+                # final mix sẽ ít nhất đến chỗ nhạc dừng hoặc voice dừng, whichever is larger
+                final_len_samples = max(voice_end_sample, music_end_sample)
+    
+            # Khởi tạo final mix
             final_mix = np.zeros(final_len_samples, dtype=np.float32)
     
-            # ------------------------------
-            # Dán voice vào final
-            # ------------------------------
+            #======================================================================
+            # 4) Dán voice vào final mix
+            #======================================================================
             voice_np = voice_waveform.numpy() * voice_volume
             v_start = voice_offset_in_final
-            v_end = v_start + voice_len_samples
+            v_end   = v_start + voice_len_samples
+            # Cẩn thận cắt nếu final_mix ngắn hơn voice
+            v_end = min(v_end, final_len_samples)
             final_mix[v_start:v_end] += voice_np[:(v_end - v_start)]
     
-            # ------------------------------
-            # Dán music vào final
-            # ------------------------------
-            music_np = music_waveform.numpy() * music_volume
-            m_start = music_offset_in_final
-            m_end = m_start + music_len_samples
-            final_mix[m_start:m_end] += music_np[:(m_end - m_start)]
+            #======================================================================
+            # 5) Dán music vào final mix (có cắt theo end_duration)
+            #======================================================================
+            if music_end_sample > music_offset_in_final:
+                # Tính xem ta copy bao nhiêu sample từ music gốc
+                # music_np = music_waveform * music_volume
+                music_np = music_waveform.numpy() * music_volume
+
+                m_start = music_offset_in_final
+                m_end   = music_end_sample  # đã cắt bớt
     
-            # Nếu muốn cắt bớt ở end_duration (thay vì cho music chạy hết) 
-            # thì bạn có thể so sánh m_end với desired_end_sample và cắt bớt.
-            # Thí dụ:
-            # if end_duration >= 0:
-            #     # cắt final_mix ở desired_end_sample
-            #     final_mix = final_mix[:desired_end_sample]
-            # else:
-            #     ... # tuỳ ý
+                # => Lượng sample thực tế copy = m_end - m_start
+                copy_len = m_end - m_start
     
-            # Convert final_mix -> AUDIO format
+                actual_copy_len = min(copy_len, music_len_samples)
+    
+                # Cuối cùng dán
+                final_mix[m_start : m_start + actual_copy_len] += music_np[:actual_copy_len]
+    
+            #======================================================================
+            # 6) Convert final_mix -> AUDIO format
+            #======================================================================
             final_torch = torch.from_numpy(final_mix).unsqueeze(0)
             audio_dict = {
                 "waveform": final_torch,
                 "sample_rate": sr
             }
     
-            # Sau đó ghi file tạm, upload Drive ... (như code bạn đã có)
+            #======================================================================
+            # 7) Lưu file tạm, upload lên Drive, trả về
+            #======================================================================
             drive_url = self._save_and_upload_audio(final_torch, sr)
-    
             return (audio_dict, drive_url)
     
         except Exception as e:
             raise RuntimeError(f"Lỗi khi trộn audio: {str(e)}")
+
 
 
     def _return_mono_audio(self, np_audio_mono, sr):
