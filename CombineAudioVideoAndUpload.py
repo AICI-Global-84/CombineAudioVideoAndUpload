@@ -255,13 +255,30 @@ class LoadAudioURL:
 
     @classmethod
     def VALIDATE_INPUTS(s, audio_url):
+        # Convert link Google Drive 'view' -> link download, v.v...
+        audio_url = s._normalize_drive_link(audio_url)
+    
         try:
-            response = requests.head(audio_url)
-            if response.status_code != 200:
-                return f"Invalid audio URL: {audio_url}"
+            if "drive.google.com" in audio_url:
+                # Bỏ qua HEAD hoặc thay bằng GET
+                return True
+            else:
+                # Bình thường (nếu không phải link Drive), dùng HEAD
+                response = requests.head(audio_url, allow_redirects=True)
+                if response.status_code != 200:
+                    return f"Invalid audio URL: {audio_url}"
         except Exception as e:
             return f"Error accessing audio URL: {str(e)}"
         return True
+    
+    @staticmethod
+    def _normalize_drive_link(audio_url):
+        # Convert https://drive.google.com/file/d/FILE_ID/view -> https://drive.google.com/uc?export=download&id=FILE_ID
+        if "drive.google.com" in audio_url and "/view" in audio_url:
+            file_id = audio_url.split('/d/')[1].split('/view')[0]
+            return f"https://drive.google.com/uc?export=download&id={file_id}"
+        return audio_url
+    
 
 
 class CombineAudio:
